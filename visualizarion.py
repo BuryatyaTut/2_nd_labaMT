@@ -9,6 +9,7 @@ TOKENS = {
     'LT': r'<',
     'GT': r'>',
     'SEMICOLON': r';',
+    'AMPERSAND': '&',
     'WHITESPACE': r'[ \t\n]+',  # To be skipped
     'UNKNOWN': r'.',  # Any other character
 }
@@ -56,6 +57,10 @@ def tokenize(code):
             tokens.append(('SEMICOLON', ';'))
             i += 1
 
+        elif char == '&':
+            tokens.append(('AMPERSAND', '&'))
+            i += 1
+
         # Handling unknown characters
         else:
             raise SyntaxError(f"Unknown character: {char}")
@@ -93,12 +98,17 @@ class Parser:
         self.node_count += 1
         return node_id
 
-    def parse_array_type(self, parent):
-        array_node = self.add_node(parent, 'ArrayType')
-        self.match('ARRAY', array_node)
-        self.match('LT', array_node)
-        self.parse_type(array_node)
-        self.match('GT', array_node)
+    # ======================================
+    def parse_type_list(self, parent):
+        type_list_node = self.add_node(parent, 'TypeList')
+        self.parse_type(type_list_node)
+        self.parse_type_tail(type_list_node)
+
+    def parse_type_tail(self, parent):
+        while self.current_token and self.current_token[0] == 'AMPERSAND':
+            ampersand_node = self.add_node(parent, 'Ampersand')
+            self.match('AMPERSAND', ampersand_node)
+            self.parse_type(ampersand_node)
 
     def parse_type(self, parent):
         type_node = self.add_node(parent, 'Type')
@@ -106,6 +116,15 @@ class Parser:
             self.parse_array_type(type_node)
         else:
             self.match('IDENTIFIER', type_node)
+
+    def parse_array_type(self, parent):
+        array_node = self.add_node(parent, 'ArrayType')
+        self.match('ARRAY', array_node)
+        self.match('LT', array_node)
+        self.parse_type_list(array_node)
+        self.match('GT', array_node)
+
+    # ==========================================
 
     def parse(self):
         root = self.add_node(None, 'S')
@@ -120,8 +139,103 @@ class Parser:
         self.tree.render(filename, format='png', view=True)
 
 
-test_input = "var g_g: Array<Array<Array<Array<Long>>>>;"
-tokens = tokenize(test_input)
-parser = Parser(tokens)
-parser.parse()
-parser.visualize()
+def run_tests():
+    test_cases = [
+         # Valid Inputs
+        ("var a: Array<Int>;", True),
+        ("var b: Array<String>", True),
+        ("var c: Array<Array<Float>>;", True),
+        ("var dhjhj: Array<Array<Array<Boolean>>>", True),
+        ("var e : Array < Double >;", True),
+        ("var f: Array<CustomType123>;", True),
+        ("var g_g: Array<Array<Array<Array<Long>>>>", True),
+
+        # Invalid Inputs
+        ("x: Array<Int>;", False),
+        ("var i: Array<>;", False),
+        ("var j: Array;", False),
+        ("var k: Int;", False),
+        ("var : Array<String>;", False),
+        ("var l: Array_<Int>;", False),
+        ("var m: Array<Array<>>;", False),
+        ("var n: Array<Int#>;", False),
+        ("var o Array<String>;", False),
+        ("var p: <Array<Int>>;", False),
+        ("Array<Int> var q;", False),
+        ("var r: Array<Array<Int> String>;", False),
+        ("var s: Array<Array;>", False),
+        ("var t: Array<1Int>;", False),
+        ("var u: Array<Array_>", False),
+        ("var v: ;", False),
+        ("var Array<Int> w;", False),
+
+        # AMPERSAND VALID
+        ("var x: Array<Int&String&Double>;", True),
+        ("var y: Array<Array<Int&Float>>;", True),
+        ("var z: Array<Array<Array<String&Int>>>;", True),
+        ("var a: Array<CustomType&AnotherType>;", True),
+        ("var b: Array<Int&Int>;", True),
+        ("var c: Array<Array<Int>&Array<Float>>;", True),
+        ("var d: Array<Array<Int&String>>;", True),
+        ("var e: Array<Int&Array<String>>;", True),
+        ("var f: Array<Array<Int>&String>;", True),
+        ("var g: Array<Array<Array <Int&Float> > &    Double>;", True),
+        ("var b: Array<Int & Float>;", True),
+        ("var f: Array<Int &Array<Float>>;", True),
+        ("var g: Array<Int & Array<String> & Double>;", True),
+
+        # AMPERSAND INVALID
+        ("var x: Array<&Int&String>;", False),
+        ("var y: Array<Int&&Float>;", False),
+        ("var z: Array<Int&>;", False),
+        ("var a: Array<>&Float>;", False),
+        ("&var c: Array<Int&Float>;", False),
+        ("var d: Array<>&String&Int>;", False),
+        ("var e: Array<Int&String&>;", False),
+        ("var x: Array<Arraay<Int>>;", False),
+        ("var y: Array<Array<Int>&>;", False),
+        ("var z: Array<Int&Float&>;", False),
+        ("var a: &Array<Int>;", False),
+        ("var b: Array<Array<Int>&Array>; ", False),
+        ("var c: Array<Array<>>;", False),
+        ("var d: Array<Identifer&>;", False),
+        ("var e: Array<>&Array<Int>>;", False),
+        ("var f: Array<Int&&&Float>;", False),
+        ("var g: Array<Array<Int&String&&Double>>;", False)
+
+    ]
+
+    failed_tests_cnt = 0
+    for input, should_pass in test_cases:
+        try:
+            tokens = tokenize(input)
+            parser = Parser(tokens)
+            parser.parse()
+            if not should_pass:
+                print(f"!!!!!!!!!!!!!!!!!!!Test failed (should not pass): {input}")
+                failed_tests_cnt += 1
+            else:
+                print("test success |", input)
+        except SyntaxError:
+            if should_pass:
+                print(f"!!!!!!!!!!!!!!!!!!!Test failed (should pass): {input}")
+                failed_tests_cnt += 1
+            else:
+                print("test success (failing) |", input)
+
+    print(f"{failed_tests_cnt} tests failed")
+
+
+def main():
+    # test_input = "var g: Array<Int & Array<String> & Double>;"
+    test_input = "var g: Array<Int & String>"
+    tokens = tokenize(test_input)
+    print(tokens)
+    parser = Parser(tokens)
+    parser.parse()
+    parser.visualize()
+
+
+if __name__ == '__main__':
+    # run_tests()
+    main()
